@@ -3,6 +3,9 @@ from pymysql.connections import Connection
 from config import MYSQL_CONFIG
 from typing import Any, Optional
 
+# Raised when MySQL is unreachable or credentials are wrong
+DatabaseAccessError = pymysql.OperationalError
+
 
 def _get_connection() -> Connection:
     """
@@ -123,7 +126,8 @@ def get_first_films(params: dict[str, Any], limit: int) \
             cursor.execute(count_q, tuple(query_params))
             total_count = cursor.fetchone()[0]
 
-            search_q = _FILM_LIST_SELECT + query + " LIMIT %s;"
+            search_q = (_FILM_LIST_SELECT + query +
+                        " ORDER BY f.film_id LIMIT %s;")
             cursor.execute(search_q, tuple(query_params+[limit]))
             films = cursor.fetchall()
             return films, total_count
@@ -142,7 +146,8 @@ def get_next_films(params: dict[str, Any], limit: int, offset: int) \
     conn = _get_connection()
     try:
         with conn.cursor() as cursor:
-            search_q = _FILM_LIST_SELECT + query + " LIMIT %s OFFSET %s;"
+            search_q = (_FILM_LIST_SELECT + query +
+                        " ORDER BY f.film_id LIMIT %s OFFSET %s;")
             cursor.execute(search_q, tuple(query_params + [limit] + [offset]))
             films = cursor.fetchall()
             return films
@@ -173,7 +178,8 @@ def get_film_by_id(film_id: int) -> Optional[tuple[Any, ...]]:
             LEFT JOIN category c ON fc.category_id = c.category_id 
             LEFT JOIN film_actor fa ON f.film_id = fa.film_id 
             LEFT JOIN actor a ON fa.actor_id = a.actor_id 
-                WHERE f.film_id = %s;
+                WHERE f.film_id = %s
+            GROUP BY f.film_id;
             """
             cursor.execute(search_q, (film_id,))
             film = cursor.fetchone()

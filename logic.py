@@ -1,6 +1,7 @@
 import mysql_connector
 import mongo_connector
 from mongo_connector import MongoError
+from mysql_connector import DatabaseAccessError
 from typing import Any, Optional
 
 

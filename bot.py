@@ -8,6 +8,8 @@ import asyncio
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.base import StorageKey
+from aiogram.types import ErrorEvent
 
 import keyboards
 import re
@@ -35,8 +37,60 @@ class FSMFilmsSearch(StatesGroup):
     in_top_params_menu = State()
 
 
-@dp.message(F.content_type.in_({'voice', 'video', 'sticker', 'audio',
-                                'contact', 'location', 'poll', 'document'}))
+async def remove_old_keyboard(chat_id: int, message_id: int | None) -> None:
+    """
+    Remove the inline keyboard from the previous bot menu message.
+    Failures are printed to the console only, the user is not notified.
+    """
+    if not message_id:
+        return
+    try:
+        await bot.edit_message_reply_markup(
+            chat_id=chat_id,
+            message_id=message_id,
+            reply_markup=None
+        )
+    except Exception as e:
+        print(f"Failed to remove old buttons: {e}")
+
+
+@dp.errors()
+async def handle_error(event: ErrorEvent):
+    exception = event.exception
+    if isinstance(exception, logic.DatabaseAccessError):
+        print(f"Database access error: {exception!r}")
+        text = ("Connection to database was interrupted."
+                "\nPlease, try again later.\n<b>Main menu</b>")
+    else:
+        print(f"Unexpected error: {exception!r}")
+        text = ("Something went wrong. Please, try again later."
+                "\n<b>Main menu</b>")
+
+    obj = event.update.event
+    if isinstance(obj, Message):
+        message = obj
+    else:
+        message = getattr(obj, "message", None)
+    user = getattr(obj, "from_user", None)
+    if message is None or user is None:
+        return True
+
+    key = StorageKey(bot_id=bot.id, chat_id=message.chat.id,
+                     user_id=user.id)
+    fsm = FSMContext(storage=storage, key=key)
+
+    data = await fsm.get_data()
+    await remove_old_keyboard(message.chat.id,
+                              data.get("last_menu_message_id"))
+
+    await fsm.clear()
+    sent_msg = await bot.send_message(chat_id=message.chat.id, text=text,
+                                      reply_markup=keyboards.keyboard_menu,
+                                      parse_mode="HTML")
+    await fsm.update_data(last_menu_message_id=sent_msg.message_id)
+    return True
+
+@dp.message(~F.text)
 async def unexpected_message_type(message: Message):
     await message.reply(text="This content type is not supported")
 
@@ -347,16 +401,8 @@ async def process_year_from_input(message: Message, state: FSMContext):
     text = message.text.strip()
     data = await state.get_data()
 
-    last_msg_id = data.get("last_menu_message_id")
-    if last_msg_id:
-        try:
-            await bot.edit_message_reply_markup(
-                chat_id=message.chat.id,
-                message_id=last_msg_id,
-                reply_markup=None
-            )
-        except Exception as e:
-            print(f"Failed to remove old buttons: {e}")
+    await remove_old_keyboard(
+        message.chat.id, data.get("last_menu_message_id"))
 
     if not text.isdigit():
         sent_msg = await message.answer(
@@ -394,16 +440,8 @@ async def process_year_to_input(message: Message, state: FSMContext):
     text = message.text.strip()
     data = await state.get_data()
 
-    last_msg_id = data.get("last_menu_message_id")
-    if last_msg_id:
-        try:
-            await bot.edit_message_reply_markup(
-                chat_id=message.chat.id,
-                message_id=last_msg_id,
-                reply_markup=None
-            )
-        except Exception as e:
-            print(f"Failed to remove old buttons: {e}")
+    await remove_old_keyboard(
+        message.chat.id, data.get("last_menu_message_id"))
 
     if not text.isdigit():
         sent_msg = await message.answer(
@@ -429,50 +467,40 @@ async def process_year_to_input(message: Message, state: FSMContext):
 
     params = {"year_from": year_from, "year_to": year_to, "genre": genre}
 
-    try:
-        films, count, is_saved = await asyncio.to_thread(
-            logic.search, params, LIMIT, "genre_year", "tg_bot"
-        )
+    films, count, is_saved = await asyncio.to_thread(
+        logic.search, params, LIMIT, "genre_year", "tg_bot"
+    )
 
-        saved_txt = "" if is_saved else ("\nWarning: Search was successful, "
-                                         "but logs could not be saved.")
-        if count == 0:
-            sent_msg = await message.answer(
-                text=f"No results found for your query.{saved_txt}",
-                reply_markup=keyboards.keyboard_menu
-            )
-            await state.clear()
-            await state.update_data(last_menu_message_id=sent_msg.message_id)
-            return
-
-        await state.set_state(FSMFilmsSearch.show_films)
-        text_page, markup, list_id = generate_films_page_layout(films, 0,
-                                                                count)
-
+    saved_txt = "" if is_saved else ("\nWarning: Search was successful, "
+                                     "but logs could not be saved.")
+    if count == 0:
         sent_msg = await message.answer(
-            text=text_page + saved_txt,
-            reply_markup=markup,
-            parse_mode="HTML"
-        )
-
-        await state.update_data(
-            params=params,
-            total_count=count,
-            current_film=0,
-            current_films_text=text_page,
-            current_keyboard_markup=markup,
-            list_id=list_id,
-            last_menu_message_id=sent_msg.message_id
-        )
-
-    except Exception as e:
-        print(f"Error during genre/year search: {e}")
-        sent_msg = await message.answer(
-            "An error occurred during search. Returning to menu.",
+            text=f"No results found for your query.{saved_txt}",
             reply_markup=keyboards.keyboard_menu
         )
         await state.clear()
         await state.update_data(last_menu_message_id=sent_msg.message_id)
+        return
+
+    await state.set_state(FSMFilmsSearch.show_films)
+    text_page, markup, list_id = generate_films_page_layout(films, 0,
+                                                            count)
+
+    sent_msg = await message.answer(
+        text=text_page + saved_txt,
+        reply_markup=markup,
+        parse_mode="HTML"
+    )
+
+    await state.update_data(
+        params=params,
+        total_count=count,
+        current_film=0,
+        current_films_text=text_page,
+        current_keyboard_markup=markup,
+        list_id=list_id,
+        last_menu_message_id=sent_msg.message_id
+    )
 
 
 @dp.callback_query(F.data.in_(["main_menu_3_click"]))
@@ -510,16 +538,8 @@ async def process_pagination(callback: CallbackQuery, state: FSMContext):
     params = data.get("params")
 
     if not params:
-        last_msg_id = data.get("last_menu_message_id")
-        if last_msg_id:
-            try:
-                await bot.edit_message_reply_markup(
-                    chat_id=callback.message.chat.id,
-                    message_id=last_msg_id,
-                    reply_markup=None
-                )
-            except Exception as e:
-                print(f"Failed to remove old buttons: {e}")
+        await remove_old_keyboard(
+            callback.message.chat.id, data.get("last_menu_message_id"))
         await callback.message.answer(
             "Search session has expired. Please start over.",
             reply_markup=keyboards.keyboard_menu)
@@ -560,78 +580,48 @@ async def keyword_input(message: Message, state: FSMContext):
     keyword = message.text.strip()
     pattern = r"^[a-zA-Zа-яА-ЯёЁ\s]+$"
     if re.match(pattern, keyword):
-        try:
-            params = {"keyword": keyword}
-            films, count, is_saved = await asyncio.to_thread(
-                logic.search, params, LIMIT, "Keyword", "tg_bot")
-            saved_txt = ""
-            if not is_saved:
-                saved_txt = ("\nWarning: Search was successful, "
-                             "but logs could not be saved.")
-            data = await state.get_data()
-            last_msg_id = data.get("last_menu_message_id")
-            if last_msg_id:
-                try:
-                    await bot.edit_message_reply_markup(
-                        chat_id=message.chat.id,
-                        message_id=last_msg_id,
-                        reply_markup=None
-                    )
-                except Exception as e:
-                    print(f"Failed to remove old buttons: {e}")
-            if count == 0:
-                sent_msg = await message.answer(
-                    text=f"No results found for query <b>{keyword}</b>."
-                         f"{saved_txt}"
-                         f"\nMain menu",
-                    reply_markup=keyboards.keyboard_menu,
-                    parse_mode="HTML")
-                await state.clear()
-                await state.update_data(
-                    last_menu_message_id=sent_msg.message_id)
-                return
-            await state.set_state(FSMFilmsSearch.show_films)
-            text, markup, list_id = generate_films_page_layout(films,
-                                                               0, count)
-            sent_msg = await message.answer(text=text + saved_txt,
-                                            reply_markup=markup,
-                                            parse_mode="HTML")
-            await state.update_data(
-                params=params,
-                total_count=count,
-                current_film=0,
-                current_films_text=text,
-                current_keyboard_markup=markup,
-                list_id=list_id
-            )
-
+        params = {"keyword": keyword}
+        films, count, is_saved = await asyncio.to_thread(
+            logic.search, params, LIMIT, "Keyword", "tg_bot")
+        saved_txt = ""
+        if not is_saved:
+            saved_txt = ("\nWarning: Search was successful, "
+                         "but logs could not be saved.")
+        data = await state.get_data()
+        await remove_old_keyboard(
+            message.chat.id, data.get("last_menu_message_id"))
+        if count == 0:
+            sent_msg = await message.answer(
+                text=f"No results found for query <b>{keyword}</b>."
+                     f"{saved_txt}"
+                     f"\nMain menu",
+                reply_markup=keyboards.keyboard_menu,
+                parse_mode="HTML")
+            await state.clear()
             await state.update_data(
                 last_menu_message_id=sent_msg.message_id)
-        except TelegramBadRequest as e:
-            if "message is not modified" not in str(e):
-                print(e)
-        except Exception as e:
-            await state.clear()
-            sent_msg = await message.answer(
-                text="Connection to database was interrupted."
-                     "\nPlease, try again later.\n<b>Main menu</b>",
-                reply_markup=keyboards.keyboard_menu,
-                parse_mode="HTML"
-            )
-            await state.update_data(last_menu_message_id=sent_msg.message_id)
             return
+        await state.set_state(FSMFilmsSearch.show_films)
+        text, markup, list_id = generate_films_page_layout(films,
+                                                           0, count)
+        sent_msg = await message.answer(text=text + saved_txt,
+                                        reply_markup=markup,
+                                        parse_mode="HTML")
+        await state.update_data(
+            params=params,
+            total_count=count,
+            current_film=0,
+            current_films_text=text,
+            current_keyboard_markup=markup,
+            list_id=list_id
+        )
+
+        await state.update_data(
+            last_menu_message_id=sent_msg.message_id)
     else:
         data = await state.get_data()
-        last_msg_id = data.get("last_menu_message_id")
-        if last_msg_id:
-            try:
-                await bot.edit_message_reply_markup(
-                    chat_id=message.chat.id,
-                    message_id=last_msg_id,
-                    reply_markup=None
-                )
-            except Exception as e:
-                print(f"Failed to remove old buttons: {e}")
+        await remove_old_keyboard(
+            message.chat.id, data.get("last_menu_message_id"))
         sent_msg = await message.answer(
             text="Keyword can contain only letters.\n"
                  "Send your keyword as a text message:",
@@ -659,16 +649,8 @@ def generate_films_page_layout(films, curr, total_count):
 @dp.message(FSMFilmsSearch.show_films)
 async def process_film_id_input(message: Message, state: FSMContext):
     data = await state.get_data()
-    last_msg_id = data.get("last_menu_message_id")
-    if last_msg_id:
-        try:
-            await bot.edit_message_reply_markup(
-                chat_id=message.chat.id,
-                message_id=last_msg_id,
-                reply_markup=None
-            )
-        except Exception as e:
-            print(f"Failed to remove old buttons: {e}")
+    await remove_old_keyboard(
+        message.chat.id, data.get("last_menu_message_id"))
     if message.text.strip().isdigit():
         film_id = int(message.text.strip())
     else:
@@ -693,7 +675,7 @@ async def process_film_id_input(message: Message, state: FSMContext):
         return
 
     film = await asyncio.to_thread(logic.get_film, film_id)
-    if film == None:
+    if film is None:
         await state.clear()
         sent_msg = await message.answer(
             text="Film was not found, sorry(\n<b>Main menu</b>",
@@ -732,16 +714,8 @@ async def process_film_id_input(message: Message, state: FSMContext):
 async def handle_unexpected_message(message: Message, state: FSMContext):
     current_state = await state.get_state()
     data = await state.get_data()
-    last_msg_id = data.get("last_menu_message_id")
-    if last_msg_id:
-        try:
-            await bot.edit_message_reply_markup(
-                chat_id=message.chat.id,
-                message_id=last_msg_id,
-                reply_markup=None
-            )
-        except Exception as e:
-            print(f"Failed to remove old buttons: {e}")
+    await remove_old_keyboard(
+        message.chat.id, data.get("last_menu_message_id"))
     if current_state == FSMFilmsSearch.in_statistics_menu.state:
         target_menu = keyboards.keyboard_stat_menu
         menu_name = "<b>Statistics Menu</b>\nSelect an option below:"
@@ -765,4 +739,6 @@ async def handle_unexpected_message(message: Message, state: FSMContext):
 
 
 if __name__ == '__main__':
+    if not logic.init_app():
+        print("Warning: MongoDB is unavailable, query statistics will not be saved.")
     dp.run_polling(bot)
