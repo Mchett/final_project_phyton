@@ -90,7 +90,7 @@ def check_year(min_year: int, max_year: int) -> tuple[int, int, str]:
                    f"Search will use one year as range {y1}")
         y2 = y1
     elif y2 < y1:
-        changed = (f"The years input was incorrect 'from {y1} -  to {y2}'"
+        changed = (f"The years input was incorrect 'from {y1} -  to {y2} '"
                    f"Years will be changed to 'from {y2} to {y1}'")
         y1, y2 = y2, y1
     return y1, y2, changed
@@ -266,6 +266,29 @@ def stat_menu() -> None:
     print("-" * 42)
 
 
+def format_row(cells: list[Any], widths: list[int]) -> str:
+    """
+    Format one table row
+    """
+    return "|" + "|".join(f"{str(c):<{w}}"
+                          for c, w in zip(cells, widths)) + "|"
+
+
+def print_table(headers: list[str], rows: list[list[Any]]) -> None:
+    """
+    Print rows as a text table
+    """
+    widths = [max(len(str(v)) for v in col) for col in zip(headers, *rows)]
+    line = "-" * (sum(widths) + len(widths) + 1)
+
+    print(line)
+    print(format_row(headers, widths))
+    print(line)
+    for row in rows:
+        print(format_row(row, widths))
+    print(line)
+
+
 def statistic() -> None:
     """
     Handle viewing various application statistics and analytics options.
@@ -276,53 +299,71 @@ def statistic() -> None:
         print()
         try:
             match user_choice:
-                case  "1":
+                case "1":
                     stat = logic.get_popular()
                     print("--- Popular search types ---")
-                    for item in stat:
-                        print(f"Type: {item['_id']} | "
-                              f"Query count: {item['count']}")
+                    if not stat:
+                        print("No statistics yet.")
+                    else:
+                        rows = [[item['_id'], item['count']] for item in stat]
+                        print_table(["Type", "Query count"], rows)
                 case "2":
-                    t = "Coose query type for statistics."
+                    t = "Choose query type for statistics."
                     q_type = input_by_list(["Keyword", "Custom",
                                             "genre_year"], t)
                     lim = input_limit(
                         "How many top queries to show? (default 5, max 10): ")
                     print(f"--- Top {lim} parameters by {q_type} ---")
                     top_params = logic.top_in_type(q_type, lim)
-                    for item in top_params:
-                        if ('keyword' in item['_id']['params'] and
-                                item['_id']['params']['keyword'] == ""):
-                            del item['_id']['params']['keyword']
-                        print(f"Params: {item['_id']['params']} |",
-                              f"Query count: {item['count_query']}")
+                    if not top_params:
+                        print("No statistics yet.")
+                    else:
+                        rows = []
+                        for item in top_params:
+                            if ('keyword' in item['_id']['params'] and
+                                    item['_id']['params']['keyword'] == ""):
+                                del item['_id']['params']['keyword']
+                            rows.append([str(item['_id']['params']),
+                                         item['count_query']])
+                        print_table(["Params", "Query count"], rows)
+                    input("Press ENTER to return to the statistics menu...")
                 case "3":
                     clients = logic.stat_by_client()
                     print("--- Activity by client ---")
-                    for item in clients:
-                        print(f"Client: {item['_id']} | "
-                              f"Query count: {item['count']}")
+                    if not clients:
+                        print("No statistics yet.")
+                    else:
+                        rows = [[item['_id'], item['count']]
+                                for item in clients]
+                        print_table(["Client", "Query count"], rows)
                 case "4":
                     lim = input_limit(
                         "How many recent queries to show? "
                         "(default 5, max 10): ")
                     print(f"--- Recent {lim} queries ---")
                     recent_params = logic.get_recent_queries(lim)
-                    for item in recent_params:
-                        print()
-                        print(f"Timestamp: {item['timestamp']}")
-                        print(f"Client: {item['client']}")
-                        print(f"Search type: {item['search_type']}")
-                        print(f"Params: {item['params']}")
-                        print(f"Results count: {item['count']}")
-
+                    if not recent_params:
+                        print("No statistics yet.")
+                    else:
+                        rows = []
+                        for item in recent_params:
+                            ts = item['timestamp'].strftime("%Y-%m-%d %H:%M:%S")
+                            rows.append([ts, item['client'],
+                                         item['search_type'],
+                                         str(item['params']),
+                                         item['count'],
+                                         'User entered incorrect years'
+                                         if item.get('exception') else ''])
+                        print_table(["Timestamp", "Client", "Search type",
+                                     "Params", "Results", "Exception"], rows)
+                    input("Press ENTER to return to the statistics menu...")
                 case "5":
                     break
                 case _:
                     print("Invalid menu item selected. Please try again.")
         except logic.MongoError as e:
             print(f"[!] Could not load statistics: {e}")
-            
+
 
 def genre_years() -> None:
     """
@@ -365,7 +406,7 @@ def main() -> None:
     try:
         mongo_available = logic.init_app()
     except Exception as e:
-        print(e)
+        print(f"[!] Cannot connect to MySQL: {e}")
     else:
         if mongo_available:
             print("All databases successfully loaded!")
@@ -390,6 +431,9 @@ def main() -> None:
                         break
                     case _:
                         print("Invalid menu item selected. Please try again.")
+            except logic.DatabaseAccessError as e:
+                print(f"[!] Cannot connect to MySQL: {e}")
+                break
             except Exception as e:
                 print(e)
                 break

@@ -18,7 +18,11 @@ def test_connection() -> None:
     """
     Check if MongoDB database connection is working.
     """
-    close_connection(_get_connection())
+    client = _get_connection()
+    try:
+        client.admin.command("ping")
+    finally:
+        close_connection(client)
 
 
 def save_query(params: dict[str, Any], count: int, search_type: str,
@@ -70,8 +74,7 @@ def top_in_type(query_type: str, limit: int = 5) -> list[dict[str, Any]]:
                                 '$ifNull': ['$params.keyword', '']}}}]}}},
                 {'$group': {'_id': {
                     'search_type': '$search_type',
-                    'params': '$normalized_params',
-                    'count_res': '$count'},
+                    'params': '$normalized_params'},
                     'count_query': {'$sum': 1}}},
                 {'$sort': {'count_query': -1}},
                 {'$limit': limit},]
