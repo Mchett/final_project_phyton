@@ -122,6 +122,10 @@ def get_recent_queries(limit: int = 5) -> list[dict[str, Any]]:
 
 
 def close_connection(client: MongoClient) -> Optional[bool]:
+    """
+    Safely close the MongoDB connection.
+    :return: True on success, None if closing failed.
+    """
     try:
         client.close()
         return True

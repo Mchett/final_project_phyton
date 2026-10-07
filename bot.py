@@ -1,4 +1,4 @@
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, BaseMiddleware
 from aiogram.types import Message
 from aiogram.filters import Command, StateFilter
 from aiogram import F
@@ -11,6 +11,7 @@ from aiogram.fsm.storage.memory import MemoryStorage, SimpleEventIsolation
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.types import ErrorEvent
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import keyboards
@@ -26,6 +27,34 @@ LIMIT = 10
 storage = MemoryStorage()
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=storage, events_isolation=SimpleEventIsolation())
+
+
+class StaleCallbackMiddleware(BaseMiddleware):
+    """
+    Ignore a click on a keyboard that has already been replaced by
+    another click processed earlier
+    """
+    async def __call__(
+        self,
+        handler: Callable[[CallbackQuery, dict[str, Any]], Awaitable[Any]],
+        event: CallbackQuery,
+        data: dict[str, Any]
+    ) -> Any:
+        """
+        Run the handler only if the click targets the currently active
+        menu message, otherwise just acknowledge it and stop.
+        """
+        state: FSMContext = data["state"]
+        last_menu_message_id = (await state.get_data()).get(
+            "last_menu_message_id")
+        if (last_menu_message_id is not None
+                and event.message.message_id != last_menu_message_id):
+            await event.answer("This button is no longer active.")
+            return None
+        return await handler(event, data)
+
+
+dp.callback_query.middleware(StaleCallbackMiddleware())
 
 
 class FSMFilmsSearch(StatesGroup):
@@ -267,7 +296,9 @@ async def show_recent_queries(
         response += "<i>No recent queries found.</i>"
     else:
         for item in recent_params:
-            timestamp = item.get('timestamp', 'N/A')
+            timestamp = item.get('timestamp')
+            timestamp = (timestamp.strftime("%Y-%m-%d %H:%M:%S")
+                        if timestamp else 'N/A')
             client = item.get('client', 'N/A')
             search_type = item.get('search_type', 'N/A')
             params = item.get('params', {})

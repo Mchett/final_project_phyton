@@ -18,7 +18,7 @@ def input_by_list(values: list[str], text: str) -> Optional[str]:
             element = input("Enter number or value:").strip()
             if element in values:
                 return element
-            if element.isdigit() and 0 < int(element) <= len(values):
+            if element.isdecimal() and 0 < int(element) <= len(values):
                 return values[int(element) - 1]
             print("[!] Error!\nValue must match the list.")
     else:
@@ -40,7 +40,7 @@ def input_limit(prompt: str, default: int = 5, max_limit: int = 10) -> int:
     :return: validated limit value.
     """
     limit_num = input(prompt).strip()
-    lim = int(limit_num) if limit_num.isdigit() else default
+    lim = int(limit_num) if limit_num.isdecimal() else default
     return lim if 0 < lim <= max_limit else default
 
 
@@ -54,7 +54,7 @@ def input_year(min_year: int, max_year: int, text: str) -> int:
         y = input(text).strip()
         if y == "":
             return -1
-        if y.isdigit() and min_year <= int(y) <= max_year:
+        if y.isdecimal() and min_year <= int(y) <= max_year:
             return int(y)
         print("[!] Error!\n[!] Year must be a number and within the range",
               f"{min_year} - {max_year}.\n[!] Or enter an empty line.")
@@ -112,6 +112,29 @@ def input_text() -> str:
               f"letters and spaces.")
 
 
+def format_row(cells: list[Any], widths: list[int]) -> str:
+    """
+    Format one table row
+    """
+    return "|" + "|".join(f"{str(c):<{w}}"
+                          for c, w in zip(cells, widths)) + "|"
+
+
+def print_table(headers: list[str], rows: list[list[Any]]) -> None:
+    """
+    Print rows as a text table
+    """
+    widths = [max(len(str(v)) for v in col) for col in zip(headers, *rows)]
+    line = "-" * (sum(widths) + len(widths) + 1)
+
+    print(line)
+    print(format_row(headers, widths))
+    print(line)
+    for row in rows:
+        print(format_row(row, widths))
+    print(line)
+
+
 def show_film(film_id: int) -> str:
     """
     Display detailed information about a specific film and prompt
@@ -148,19 +171,13 @@ def show_result(films: tuple[Any, ...], size: int, params: dict[str, Any])\
         print("No movies found matching your request")
     else:
         while count_cur <= size:
-            ids = []
+            ids = [film[0] for film in films]
             print()
             print(f"Found {size} movies. Showing movies from {count_cur + 1}",
                   f"to {count_cur + len(films)}.")
-            print("-" * 41)
-            print(f"|{'ID':<4}|{'Title':<20}|{'Year':<6}|{'Rating':<6}|")
-            print("-" * 41)
-            for film in films:
-                ids.append(film[0])
-                title = (
-                    film[1] if len(film[1]) <= 19 else film[1][:16] + "...")
-                print(f"|{film[0]:<4}|{title:<20}|{film[2]:<6}|{film[3]:<6}|")
-            print("-" * 41)
+
+            rows = [[film[0], film[1], film[2], film[3]] for film in films]
+            print_table(["ID", "Title", "Year", "Rating"], rows)
             text = "Navigation:"
             text += (" [p] Previous page |" if count_cur > 0 else "")
             text += (
@@ -182,7 +199,7 @@ def show_result(films: tuple[Any, ...], size: int, params: dict[str, Any])\
                 elif user_choice == "m":
                     count_cur = size + 1
                     break
-                elif user_choice.isdigit() and int(user_choice) in ids:
+                elif user_choice.isdecimal() and int(user_choice) in ids:
                     if show_film(int(user_choice)).strip().lower() == "m":
                         count_cur = size + 1
                     break
@@ -266,29 +283,6 @@ def stat_menu() -> None:
     print("-" * 42)
 
 
-def format_row(cells: list[Any], widths: list[int]) -> str:
-    """
-    Format one table row
-    """
-    return "|" + "|".join(f"{str(c):<{w}}"
-                          for c, w in zip(cells, widths)) + "|"
-
-
-def print_table(headers: list[str], rows: list[list[Any]]) -> None:
-    """
-    Print rows as a text table
-    """
-    widths = [max(len(str(v)) for v in col) for col in zip(headers, *rows)]
-    line = "-" * (sum(widths) + len(widths) + 1)
-
-    print(line)
-    print(format_row(headers, widths))
-    print(line)
-    for row in rows:
-        print(format_row(row, widths))
-    print(line)
-
-
 def statistic() -> None:
     """
     Handle viewing various application statistics and analytics options.
@@ -347,7 +341,8 @@ def statistic() -> None:
                     else:
                         rows = []
                         for item in recent_params:
-                            ts = item['timestamp'].strftime("%Y-%m-%d %H:%M:%S")
+                            ts = item['timestamp'].strftime(
+                                "%Y-%m-%d %H:%M:%S")
                             rows.append([ts, item['client'],
                                          item['search_type'],
                                          str(item['params']),
