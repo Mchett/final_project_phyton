@@ -10,8 +10,6 @@ DatabaseAccessError = pymysql.OperationalError
 def _get_connection() -> Connection:
     """
     Connect to Database and return a connection object.
-    :raises pymysql.err.OperationalError: If it can't connect to MySQL
-        database.
     :return: Object  pymysql.connections.Connection
     """
     return pymysql.connect(**MYSQL_CONFIG)
@@ -64,7 +62,7 @@ def get_rating() -> list[str]:
 def get_years_range() -> tuple[int, int]:
     """
     Find years range in whole database
-    :return: tuple whit max year and min year
+    :return: tuple whit min year and max year
     """
     conn = _get_connection()
     query = "SELECT MIN(release_year), MAX(release_year) FROM film"

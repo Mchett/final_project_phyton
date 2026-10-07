@@ -76,7 +76,11 @@ cancel_search_keyboard = InlineKeyboardMarkup(
 )
 
 
-def generate_navigation_keyboard(limit: int, current: int, count: int):
+def generate_navigation_keyboard(limit: int, current: int,
+                                 count: int) -> InlineKeyboardMarkup:
+    """
+    Build the prev/next navigation keyboard for the current results page
+    """
     navigation_keyboard = []
     if current > 0:
         navigation_keyboard.append(prev_page_button)
@@ -87,7 +91,11 @@ def generate_navigation_keyboard(limit: int, current: int, count: int):
         [back_to_main_menu_button]])
 
 
-def generate_genres_keyboard(list_genres):
+def generate_genres_keyboard(
+        list_genres: list[str]) -> InlineKeyboardMarkup:
+    """
+    Build a keyboard with genre buttons
+    """
     genres_keyboard = []
     i = 0
     while i+1 < len(list_genres):
